@@ -36,26 +36,17 @@ rm -rf %{buildroot}
   BINARY=bin/rhelmon-linux-arm64
 %endif
 
-# Binary
-install -D -m 0755 ${BINARY}               %{buildroot}/usr/bin/rhelmon
-install -D -m 0755 configs/rhelmon-start.sh %{buildroot}/usr/bin/rhelmon-start
+install -D -m 0755 ${BINARY}                  %{buildroot}/usr/bin/rhelmon
+install -D -m 0755 configs/rhelmon-start.sh   %{buildroot}/usr/bin/rhelmon-start
+install -D -m 0644 configs/rhelmon.service    %{buildroot}/usr/lib/systemd/system/rhelmon.service
+install -D -m 0640 configs/rhelmon.conf       %{buildroot}/etc/rhelmon/rhelmon.conf
+install -D -m 0644 configs/rhelmon-logrotate  %{buildroot}/etc/logrotate.d/rhelmon
 
-# systemd unit — hardcoded path (works on both RHEL and Ubuntu rpmbuild)
-install -D -m 0644 configs/rhelmon.service  %{buildroot}/usr/lib/systemd/system/rhelmon.service
-
-# Config
-install -D -m 0640 configs/rhelmon.conf     %{buildroot}/etc/rhelmon/rhelmon.conf
-
-# Logrotate
-install -D -m 0644 configs/rhelmon-logrotate %{buildroot}/etc/logrotate.d/rhelmon
-
-# Plugin examples
 install -D -m 0755 plugins/nginx_plugin.sh            %{buildroot}/etc/rhelmon/plugins.examples/nginx_plugin.sh
 install -D -m 0755 plugins/redis_plugin.sh            %{buildroot}/etc/rhelmon/plugins.examples/redis_plugin.sh
 install -D -m 0755 plugins/postgres_plugin.py         %{buildroot}/etc/rhelmon/plugins.examples/postgres_plugin.py
 install -D -m 0755 plugins/systemd_services_plugin.sh %{buildroot}/etc/rhelmon/plugins.examples/systemd_services_plugin.sh
 
-# Directories
 install -d -m 0755 %{buildroot}/etc/rhelmon/plugins
 install -d -m 0750 %{buildroot}/var/log/rhelmon
 
@@ -69,18 +60,17 @@ exit 0
 %post
 if command -v systemctl &>/dev/null; then
   systemctl daemon-reload 2>/dev/null || true
-  systemctl enable rhelmon 2>/dev/null || true
 fi
 echo ""
 echo "  rhelmon %{version} installed."
-echo "  Start: systemctl enable --now rhelmon"
+echo "  Start:     systemctl enable --now rhelmon"
 echo "  Dashboard: http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'your-server-ip'):9000"
 echo ""
 
 %preun
 if [ $1 -eq 0 ]; then
   if command -v systemctl &>/dev/null; then
-    systemctl stop rhelmon 2>/dev/null || true
+    systemctl stop    rhelmon 2>/dev/null || true
     systemctl disable rhelmon 2>/dev/null || true
   fi
 fi
@@ -111,4 +101,4 @@ fi
 
 %changelog
 * Wed Mar 18 2026 amit25sep <amit25sep@users.noreply.github.com> - 0.1.0-1
-- Initial release
+- Initial release — all hardcoded paths, no rpm macros
