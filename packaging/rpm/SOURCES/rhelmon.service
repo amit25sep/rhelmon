@@ -1,73 +1,24 @@
 [Unit]
 Description=rhelmon - RHEL system monitoring agent
-Documentation=https://github.com/rhelmon/agent
+Documentation=https://github.com/amit25sep/rhelmon
 After=network.target
-Wants=network.target
 
 [Service]
 Type=simple
 User=rhelmon
 Group=rhelmon
-
-# Load configuration from /etc/rhelmon/rhelmon.conf
-# Each line in that file sets an env var used in ExecStart below.
-EnvironmentFile=-/etc/rhelmon/rhelmon.conf
-
-ExecStart=/usr/bin/rhelmon \
-    -addr          ${ADDR:-:9000} \
-    -history       ${HISTORY:-3600} \
-    -interval      ${INTERVAL:-1s} \
-    -broadcast     ${BROADCAST:-1s} \
-    -plugin-dir    ${PLUGIN_DIR:-/etc/rhelmon/plugins} \
-    -plugin-interval ${PLUGIN_INTERVAL:-30s} \
-    -plugin-timeout  ${PLUGIN_TIMEOUT:-10s} \
-    -slack-webhook   ${SLACK_WEBHOOK:-} \
-    -slack-channel   ${SLACK_CHANNEL:-} \
-    -smtp-host     ${SMTP_HOST:-} \
-    -smtp-port     ${SMTP_PORT:-587} \
-    -smtp-user     ${SMTP_USER:-} \
-    -smtp-pass     ${SMTP_PASS:-} \
-    -smtp-from     ${SMTP_FROM:-} \
-    -smtp-to       ${SMTP_TO:-} \
-    -prom-url      ${PROM_URL:-} \
-    -prom-user     ${PROM_USER:-} \
-    -prom-password ${PROM_PASSWORD:-} \
-    -prom-bearer   ${PROM_BEARER:-} \
-    -prom-interval ${PROM_INTERVAL:-15s} \
-    -influx-url    ${INFLUX_URL:-} \
-    -influx-token  ${INFLUX_TOKEN:-} \
-    -influx-org    ${INFLUX_ORG:-} \
-    -influx-bucket ${INFLUX_BUCKET:-rhelmon} \
-    -influx-v1db   ${INFLUX_V1DB:-} \
-    -influx-v1user ${INFLUX_V1USER:-} \
-    -influx-v1pass ${INFLUX_V1PASS:-} \
-    -influx-interval ${INFLUX_INTERVAL:-15s}
-
+ExecStart=/usr/bin/rhelmon-start
 Restart=on-failure
 RestartSec=5s
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=rhelmon
-
-# Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-PrivateDevices=true
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectControlGroups=true
-RestrictRealtime=true
-RestrictSUIDSGID=true
-LockPersonality=true
-MemoryDenyWriteExecute=true
 ReadOnlyPaths=/proc /sys
-ReadWritePaths=/var/log/rhelmon
-
-# Capabilities: none needed
-CapabilityBoundingSet=
-AmbientCapabilities=
+ReadWritePaths=/var/log/rhelmon /etc/rhelmon
 
 [Install]
 WantedBy=multi-user.target
