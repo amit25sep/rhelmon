@@ -1,0 +1,8 @@
+dist/
+rhelmon-linux-amd64
+rhelmon-linux-arm64
+*.tar.gz
+packaging/rpm/BUILD/
+packaging/rpm/BUILDROOT/
+packaging/rpm/RPMS/
+packaging/rpm/SRPMS/

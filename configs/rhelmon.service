@@ -1,0 +1,37 @@
+[Unit]
+Description=rhelmon - RHEL system monitoring agent
+Documentation=https://github.com/rhelmon/agent
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=rhelmon
+Group=rhelmon
+ExecStart=/usr/local/bin/rhelmon -addr :9000
+Restart=on-failure
+RestartSec=5s
+
+# Security hardening (RHEL 9 / systemd 252+)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+# Allow reading /proc and /sys (required for metrics)
+ReadOnlyPaths=/proc /sys
+
+# Capabilities: none needed (reads only /proc, no raw sockets)
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

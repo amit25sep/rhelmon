@@ -1,0 +1,157 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'           # triggers on: git tag v0.1.0 && git push origin v0.1.0
+  workflow_dispatch:   # allows manual trigger from GitHub UI
+
+permissions:
+  contents: write      # needed to create GitHub releases
+
+jobs:
+  build:
+    name: Build RPM and release assets
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"   # strip leading 'v'
+          else
+            VERSION="$(cat VERSION 2>/dev/null || echo 0.1.0)-dev"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION"
+
+      - name: Install rpmbuild
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y rpm
+
+      - name: Build binaries
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          LDFLAGS="-s -w -X main.version=$VERSION"
+          mkdir -p dist
+
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -ldflags "$LDFLAGS" -o dist/rhelmon-linux-amd64 ./cmd/rhelmon
+
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
+            go build -ldflags "$LDFLAGS" -o dist/rhelmon-linux-arm64 ./cmd/rhelmon
+
+          echo "Built:"
+          ls -lh dist/
+
+      - name: Build source tarball
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          mkdir -p dist/rhelmon-${VERSION}/{bin,configs,plugins}
+
+          cp dist/rhelmon-linux-amd64         dist/rhelmon-${VERSION}/bin/
+          cp dist/rhelmon-linux-arm64         dist/rhelmon-${VERSION}/bin/
+          cp packaging/rpm/SOURCES/rhelmon.conf       dist/rhelmon-${VERSION}/configs/
+          cp packaging/rpm/SOURCES/rhelmon-start.sh   dist/rhelmon-${VERSION}/configs/
+          cp packaging/rpm/SOURCES/rhelmon.service     dist/rhelmon-${VERSION}/configs/
+          cp packaging/rpm/SOURCES/rhelmon-logrotate   dist/rhelmon-${VERSION}/configs/
+          cp configs/plugins/*.sh             dist/rhelmon-${VERSION}/plugins/ 2>/dev/null || true
+          cp configs/plugins/*.py             dist/rhelmon-${VERSION}/plugins/ 2>/dev/null || true
+          cp README.md                        dist/rhelmon-${VERSION}/
+          echo "MIT"                        > dist/rhelmon-${VERSION}/LICENSE
+
+          cd dist
+          tar -czf rhelmon-${VERSION}.tar.gz rhelmon-${VERSION}/
+          rm -rf rhelmon-${VERSION}/
+
+      - name: Build RPM (RHEL 9 / el9)
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          mkdir -p packaging/rpm/{BUILD,BUILDROOT,RPMS,SRPMS}
+
+          cp dist/rhelmon-${VERSION}.tar.gz packaging/rpm/SOURCES/
+
+          rpmbuild \
+            --define "_topdir $(pwd)/packaging/rpm" \
+            --define "version ${VERSION}" \
+            --define "dist .el9" \
+            -ba packaging/rpm/SPECS/rhelmon.spec
+
+          find packaging/rpm/RPMS -name "*.rpm" -exec cp {} dist/ \;
+          find packaging/rpm/SRPMS -name "*.rpm" -exec cp {} dist/ \;
+          echo "RPM files:"
+          ls -lh dist/*.rpm
+
+      - name: Generate SHA256SUMS
+        run: |
+          cd dist
+          VERSION=${{ steps.version.outputs.version }}
+          sha256sum \
+            rhelmon-linux-amd64 \
+            rhelmon-linux-arm64 \
+            rhelmon-${VERSION}.tar.gz \
+            *.rpm \
+            > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Update install.sh version
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          sed -i "s/LATEST_VERSION=\"[^\"]*\"/LATEST_VERSION=\"${VERSION}\"/" scripts/install.sh
+          cp scripts/install.sh dist/install.sh
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: rhelmon v${{ steps.version.outputs.version }}
+          body: |
+            ## rhelmon v${{ steps.version.outputs.version }}
+
+            ### Install (RHEL 9 / Rocky / AlmaLinux)
+
+            **One-liner:**
+            ```bash
+            bash <(curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install.sh)
+            ```
+
+            **Direct RPM:**
+            ```bash
+            rpm -ivh https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/rhelmon-${{ steps.version.outputs.version }}-1.el9.x86_64.rpm
+            ```
+
+            **With dnf:**
+            ```bash
+            dnf install -y https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/rhelmon-${{ steps.version.outputs.version }}-1.el9.x86_64.rpm
+            ```
+
+            ### After install
+            ```bash
+            systemctl enable --now rhelmon
+            firewall-cmd --add-port=9000/tcp --permanent && firewall-cmd --reload
+            # Dashboard: http://your-server-ip:9000
+            ```
+
+            ### Verify checksum
+            ```bash
+            sha256sum -c SHA256SUMS
+            ```
+          draft: false
+          prerelease: false
+          files: |
+            dist/rhelmon-linux-amd64
+            dist/rhelmon-linux-arm64
+            dist/rhelmon-${{ steps.version.outputs.version }}.tar.gz
+            dist/*.rpm
+            dist/SHA256SUMS
+            dist/install.sh

@@ -1,0 +1,13 @@
+/var/log/rhelmon/*.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 rhelmon rhelmon
+    sharedscripts
+    postrotate
+        systemctl kill --signal=HUP rhelmon.service 2>/dev/null || true
+    endscript
+}
