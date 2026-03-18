@@ -3,11 +3,11 @@ name: Build and Release
 on:
   push:
     tags:
-      - 'v*'           # triggers on: git tag v0.1.0 && git push origin v0.1.0
-  workflow_dispatch:   # allows manual trigger from GitHub UI
+      - 'v*'
+  workflow_dispatch:
 
 permissions:
-  contents: write      # needed to create GitHub releases
+  contents: write
 
 jobs:
   build:
@@ -27,30 +27,61 @@ jobs:
         id: version
         run: |
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            VERSION="${GITHUB_REF_NAME#v}"   # strip leading 'v'
+            VERSION="${GITHUB_REF_NAME#v}"
           else
             VERSION="$(cat VERSION 2>/dev/null || echo 0.1.0)-dev"
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Building version: $VERSION"
 
-      - name: Install rpmbuild
+      - name: Install rpmbuild and systemd-rpm-macros
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y rpm
+          # systemd-rpm-macros is not available on Ubuntu — create a stub
+          # so rpmbuild can find the macros it needs
+          MACROS_DIR=$(rpm --eval '%{_rpmmacrodir}' 2>/dev/null || echo /usr/lib/rpm/macros.d)
+          sudo mkdir -p "$MACROS_DIR"
+          sudo tee "$MACROS_DIR/macros.systemd" > /dev/null << 'MACROS'
+          %systemd_requires \
+            Requires(post): systemd \
+            Requires(preun): systemd \
+            Requires(postun): systemd
+          %systemd_post() \
+            %{nil}
+          %systemd_preun() \
+            %{nil}
+          %systemd_postun_with_restart() \
+            %{nil}
+          MACROS
+          # Also create in alternate location rpmbuild may look
+          sudo mkdir -p /usr/lib/rpm/macros.d
+          sudo cp "$MACROS_DIR/macros.systemd" /usr/lib/rpm/macros.d/macros.systemd 2>/dev/null || true
+          sudo mkdir -p /etc/rpm
+          sudo tee /etc/rpm/macros.systemd > /dev/null << 'MACROS'
+          %systemd_requires \
+            Requires(post): systemd \
+            Requires(preun): systemd \
+            Requires(postun): systemd
+          %systemd_post() \
+            %{nil}
+          %systemd_preun() \
+            %{nil}
+          %systemd_postun_with_restart() \
+            %{nil}
+          MACROS
+          echo "RPM macros installed"
+          rpm --showrc | grep systemd || true
 
       - name: Build binaries
         run: |
           VERSION=${{ steps.version.outputs.version }}
           LDFLAGS="-s -w -X main.version=$VERSION"
           mkdir -p dist
-
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
             go build -ldflags "$LDFLAGS" -o dist/rhelmon-linux-amd64 ./cmd/rhelmon
-
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
             go build -ldflags "$LDFLAGS" -o dist/rhelmon-linux-arm64 ./cmd/rhelmon
-
           echo "Built:"
           ls -lh dist/
 
@@ -58,33 +89,34 @@ jobs:
         run: |
           VERSION=${{ steps.version.outputs.version }}
           mkdir -p dist/rhelmon-${VERSION}/{bin,configs,plugins}
-
-          cp dist/rhelmon-linux-amd64         dist/rhelmon-${VERSION}/bin/
-          cp dist/rhelmon-linux-arm64         dist/rhelmon-${VERSION}/bin/
-          cp packaging/rpm/SOURCES/rhelmon.conf       dist/rhelmon-${VERSION}/configs/
-          cp packaging/rpm/SOURCES/rhelmon-start.sh   dist/rhelmon-${VERSION}/configs/
-          cp packaging/rpm/SOURCES/rhelmon.service     dist/rhelmon-${VERSION}/configs/
-          cp packaging/rpm/SOURCES/rhelmon-logrotate   dist/rhelmon-${VERSION}/configs/
-          cp configs/plugins/*.sh             dist/rhelmon-${VERSION}/plugins/ 2>/dev/null || true
-          cp configs/plugins/*.py             dist/rhelmon-${VERSION}/plugins/ 2>/dev/null || true
-          cp README.md                        dist/rhelmon-${VERSION}/
-          echo "MIT"                        > dist/rhelmon-${VERSION}/LICENSE
-
+          cp dist/rhelmon-linux-amd64                      dist/rhelmon-${VERSION}/bin/
+          cp dist/rhelmon-linux-arm64                      dist/rhelmon-${VERSION}/bin/
+          cp packaging/rpm/SOURCES/rhelmon.conf            dist/rhelmon-${VERSION}/configs/
+          cp packaging/rpm/SOURCES/rhelmon-start.sh        dist/rhelmon-${VERSION}/configs/
+          cp packaging/rpm/SOURCES/rhelmon.service         dist/rhelmon-${VERSION}/configs/
+          cp packaging/rpm/SOURCES/rhelmon-logrotate       dist/rhelmon-${VERSION}/configs/
+          cp configs/plugins/*.sh  dist/rhelmon-${VERSION}/plugins/ 2>/dev/null || true
+          cp configs/plugins/*.py  dist/rhelmon-${VERSION}/plugins/ 2>/dev/null || true
+          cp README.md             dist/rhelmon-${VERSION}/
+          echo "MIT"             > dist/rhelmon-${VERSION}/LICENSE
           cd dist
           tar -czf rhelmon-${VERSION}.tar.gz rhelmon-${VERSION}/
           rm -rf rhelmon-${VERSION}/
 
-      - name: Build RPM (RHEL 9 / el9)
+      - name: Build RPM
         run: |
           VERSION=${{ steps.version.outputs.version }}
           mkdir -p packaging/rpm/{BUILD,BUILDROOT,RPMS,SRPMS}
-
           cp dist/rhelmon-${VERSION}.tar.gz packaging/rpm/SOURCES/
+
+          # Remove systemd-rpm-macros BuildRequires — handled by stub macros above
+          sed -i '/BuildRequires.*systemd-rpm-macros/d' packaging/rpm/SPECS/rhelmon.spec
 
           rpmbuild \
             --define "_topdir $(pwd)/packaging/rpm" \
             --define "version ${VERSION}" \
             --define "dist .el9" \
+            --nodeps \
             -ba packaging/rpm/SPECS/rhelmon.spec
 
           find packaging/rpm/RPMS -name "*.rpm" -exec cp {} dist/ \;
@@ -140,11 +172,6 @@ jobs:
             systemctl enable --now rhelmon
             firewall-cmd --add-port=9000/tcp --permanent && firewall-cmd --reload
             # Dashboard: http://your-server-ip:9000
-            ```
-
-            ### Verify checksum
-            ```bash
-            sha256sum -c SHA256SUMS
             ```
           draft: false
           prerelease: false
